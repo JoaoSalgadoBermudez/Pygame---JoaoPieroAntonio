@@ -26,7 +26,8 @@ ORANGE = (255, 184,  82)
 
 # Mapa do labirinto original do Pac-Man (28 colunas × 31 linhas)
 # '#'=parede  '.'=pellet  'o'=power pellet  ' '=vazio  '-'=porta fantasma
-MAZE_STR = [
+# list(row) torna cada linha mutável — necessário para apagar pellets comidos
+maze = [list(row) for row in [
     "############################",  # 0
     "#............##............#",  # 1
     "#.####.#####.##.#####.####.#",  # 2
@@ -58,7 +59,7 @@ MAZE_STR = [
     "#.####.#####.##.#####.####.#",  # 28
     "#............##............#",  # 29
     "############################",  # 30
-]
+]]
 
 window = pygame.display.set_mode((WIDTH, HEIGHT))  # cria a janela
 pygame.display.set_caption("Pac-Man")              # título da barra da janela
@@ -105,7 +106,7 @@ def tile_at(px, py):
     col = int(px) // TILE_SIZE
     row = (int(py) - MAZE_OFFSET_Y) // TILE_SIZE
     if 0 <= row < ROWS and 0 <= col < COLS:
-        return MAZE_STR[row][col]
+        return maze[row][col]
     return ' '  # fora dos limites do mapa = espaço vazio
 
 def can_move(x, y, dx, dy):
@@ -165,6 +166,12 @@ class Pacman(pygame.sprite.Sprite):
         # Atualiza a imagem de acordo com a direção atual
         self.image = self.sprites_dir[(self.dx, self.dy)]
 
+    def reset(self):
+        self.rect.x            = 13 * TILE_SIZE
+        self.rect.y            = MAZE_OFFSET_Y + 23 * TILE_SIZE
+        self.dx,      self.dy      = 1, 0
+        self.next_dx, self.next_dy = 1, 0
+
 
 class Ghost(pygame.sprite.Sprite):
     def __init__(self, col, row, cor):
@@ -222,7 +229,27 @@ while rodando:
             elif event.key == pygame.K_DOWN:
                 player.next_dx, player.next_dy =  0,  1
 
-    # 2. Verificar consequências  (colisões — virá nas próximas etapas)
+    # 2. Verificar consequências
+
+    # Comer pellets — verifica o tile no centro de Pac-Man
+    col_pm = player.rect.centerx // TILE_SIZE
+    row_pm = (player.rect.centery - MAZE_OFFSET_Y) // TILE_SIZE
+    if 0 <= row_pm < ROWS and 0 <= col_pm < COLS:
+        t = maze[row_pm][col_pm]
+        if t == '.':
+            maze[row_pm][col_pm] = ' '   # remove o pellet do mapa
+            score += 10
+        elif t == 'o':
+            maze[row_pm][col_pm] = ' '   # remove o power pellet do mapa
+            score += 50
+
+    # Colisão com fantasmas — spritecollide retorna lista de fantasmas que tocaram Pac-Man
+    # (Exercício 11 — spritecollide entre um sprite e um grupo)
+    if pygame.sprite.spritecollide(player, ghosts, False):
+        vidas -= 1
+        player.reset()           # volta para a posição inicial
+        if vidas <= 0:
+            rodando = False      # game over — tela própria vem na Etapa 16
 
     # 3. Atualizar estado do jogo — chama update() de todos os sprites do grupo de uma vez
     all_sprites.update()
@@ -233,7 +260,7 @@ while rodando:
 
     # --- Labirinto ---
     # Percorre o MAZE_STR tile por tile e desenha cada elemento na posição correta
-    for row, linha in enumerate(MAZE_STR):
+    for row, linha in enumerate(maze):
         for col, tile in enumerate(linha):
             x  = col * TILE_SIZE
             y  = MAZE_OFFSET_Y + row * TILE_SIZE
