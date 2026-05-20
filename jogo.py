@@ -69,7 +69,7 @@ font_title = pygame.font.SysFont(None, 64)  # fonte para GAME OVER, tela inicial
 score = 0
 vidas = 3
 
-# --- Sprites desenhados programaticamente ---
+# --- Funções auxiliares de sprite ---
 # pygame.image.load() também retorna um Surface — a interface é idêntica.
 # pygame.SRCALPHA cria Surface com canal alpha (transparência), como .convert_alpha()
 
@@ -98,26 +98,6 @@ def criar_sprite_fantasma(cor):
     pygame.draw.circle(surf, BLUE,  (cx + 3, r - 2), 1)   # pupila direita
     return surf
 
-# Cria os sprites — equivalente a pygame.image.load('arquivo.png').convert_alpha()
-_base_pacman = criar_sprite_pacman()
-
-# Quatro rotações do Pac-Man, uma por direção de movimento
-# pygame.transform.rotate() gira no sentido anti-horário
-pacman_sprites = {
-    ( 1,  0): _base_pacman,                                       # direita (base, 0°)
-    (-1,  0): pygame.transform.rotate(_base_pacman, 180),         # esquerda
-    ( 0, -1): pygame.transform.rotate(_base_pacman,  90),         # cima
-    ( 0,  1): pygame.transform.rotate(_base_pacman, 270),         # baixo
-}
-
-blinky_img = criar_sprite_fantasma(RED)     # Blinky — vermelho
-pinky_img  = criar_sprite_fantasma(PINK)    # Pinky  — rosa
-inky_img   = criar_sprite_fantasma(CYAN)    # Inky   — ciano
-clyde_img  = criar_sprite_fantasma(ORANGE)  # Clyde  — laranja
-
-# pygame.transform.scale() seria usado aqui para redimensionar imagens externas (Exercício 4)
-# ex: pacman_img = pygame.transform.scale(pacman_img, (TILE_SIZE, TILE_SIZE))
-
 # --- Funções de colisão com o labirinto ---
 
 def tile_at(px, py):
@@ -129,8 +109,8 @@ def tile_at(px, py):
     return ' '  # fora dos limites do mapa = espaço vazio
 
 def can_move(x, y, dx, dy):
-    # Verifica as duas extremidades da borda frontal do hitbox de Pac-Man.
-    # shrink=2: margem interna para que Pac-Man passe por corredores sem travar nas bordas
+    # Verifica as duas extremidades da borda frontal do hitbox.
+    # shrink=2: margem interna para passar por corredores sem travar nas bordas
     shrink = 2
     nx, ny = x + dx * SPEED, y + dy * SPEED
     if dx != 0:
@@ -142,19 +122,73 @@ def can_move(x, y, dx, dy):
         return tile_at(nx + shrink, borda_y) != '#' and \
                tile_at(nx + TILE_SIZE - 1 - shrink, borda_y) != '#'
 
-# Posição inicial do Pac-Man — coluna 13, linha 23 do labirinto
-pacman_x  = 13 * TILE_SIZE
-pacman_y  = MAZE_OFFSET_Y + 23 * TILE_SIZE
-pacman_dx = 1   # começa se movendo para a direita (Exercício 5 — movimento automático)
-pacman_dy = 0
+# =============================================================================
+# CLASSES (Etapa 7 — Exercício 7)
+#
+# Todo pygame.sprite.Sprite precisa de:
+#   self.image — Surface que será desenhada
+#   self.rect  — Rect que define posição e tamanho
+#   update()   — chamado a cada frame para atualizar o estado
+# =============================================================================
 
-# Posições iniciais dos fantasmas (coluna, linha, sprite)
-ghost_positions = [
-    (13, 11, blinky_img),  # Blinky — acima da porta da casa
-    (13, 14, pinky_img),   # Pinky  — centro da casa
-    (11, 14, inky_img),    # Inky   — esquerda da casa
-    (15, 14, clyde_img),   # Clyde  — direita da casa
-]
+class Pacman(pygame.sprite.Sprite):
+    def __init__(self):
+        pygame.sprite.Sprite.__init__(self)  # inicializa o Sprite base — obrigatório
+
+        # Pré-computa as 4 rotações do sprite; pygame.transform.rotate gira no sentido anti-horário
+        base = criar_sprite_pacman()
+        self.sprites_dir = {
+            ( 1,  0): base,
+            (-1,  0): pygame.transform.rotate(base, 180),
+            ( 0, -1): pygame.transform.rotate(base,  90),
+            ( 0,  1): pygame.transform.rotate(base, 270),
+        }
+
+        self.dx = 1   # direção atual: começa indo para a direita
+        self.dy = 0
+
+        self.image = self.sprites_dir[(self.dx, self.dy)]  # imagem inicial
+        self.rect  = self.image.get_rect()                 # rect define posição e hitbox
+        self.rect.x = 13 * TILE_SIZE
+        self.rect.y = MAZE_OFFSET_Y + 23 * TILE_SIZE
+
+    def update(self):
+        # Move se o próximo passo não colidir com parede
+        if can_move(self.rect.x, self.rect.y, self.dx, self.dy):
+            self.rect.x += self.dx * SPEED
+            self.rect.y += self.dy * SPEED
+
+        # Teleporte pelo corredor da linha 14 — rect.right e rect.left são atributos do Rect
+        if (self.rect.y - MAZE_OFFSET_Y) // TILE_SIZE == 14:
+            if self.rect.right <= 0:    # saiu pela esquerda
+                self.rect.x = WIDTH
+            elif self.rect.left >= WIDTH:  # saiu pela direita
+                self.rect.x = 0
+
+        # Atualiza a imagem de acordo com a direção atual
+        self.image = self.sprites_dir[(self.dx, self.dy)]
+
+
+class Ghost(pygame.sprite.Sprite):
+    def __init__(self, col, row, cor):
+        pygame.sprite.Sprite.__init__(self)  # inicializa o Sprite base — obrigatório
+
+        self.image = criar_sprite_fantasma(cor)  # Surface com o desenho do fantasma
+        self.rect  = self.image.get_rect()
+        self.rect.x = col * TILE_SIZE
+        self.rect.y = MAZE_OFFSET_Y + row * TILE_SIZE
+
+    def update(self):
+        pass  # movimento dos fantasmas virá nas próximas etapas
+
+
+# --- Instâncias (Exercício 7 — criar sprites usando a classe) ---
+player = Pacman()
+
+blinky = Ghost(13, 11, RED)    # Blinky — vermelho, acima da porta
+pinky  = Ghost(13, 14, PINK)   # Pinky  — rosa, centro da casa
+inky   = Ghost(11, 14, CYAN)   # Inky   — ciano, esquerda da casa
+clyde  = Ghost(15, 14, ORANGE) # Clyde  — laranja, direita da casa
 
 clock = pygame.time.Clock()  # relógio para controlar a velocidade do loop
 
@@ -170,27 +204,19 @@ while rodando:
     # 1. Tratar eventos
     # pygame.event.get() devolve todos os eventos desde o último frame
     for event in pygame.event.get():
-        if event.type == pygame.QUIT:                              # usuário clicou no X da janela
+        if event.type == pygame.QUIT:                                    # usuário clicou no X da janela
             rodando = False
         if event.type == pygame.KEYUP and event.key == pygame.K_ESCAPE:  # ESC encerra
             rodando = False
 
-    # 2. Verificar consequências
+    # 2. Verificar consequências  (colisões — virá nas próximas etapas)
 
-    # Move Pac-Man se o próximo passo não colidir com parede
-    if can_move(pacman_x, pacman_y, pacman_dx, pacman_dy):
-        pacman_x += pacman_dx * SPEED
-        pacman_y += pacman_dy * SPEED
-
-    # Teleporte pelo corredor da linha 14 — sai pela esquerda, aparece pela direita (e vice-versa)
-    pacman_row = (pacman_y - MAZE_OFFSET_Y) // TILE_SIZE
-    if pacman_row == 14:
-        if pacman_x + TILE_SIZE <= 0:   # saiu pela esquerda
-            pacman_x = WIDTH
-        elif pacman_x >= WIDTH:          # saiu pela direita
-            pacman_x = 0
-
-    # 3. Atualizar estado do jogo (sprites, animações — virá nas próximas etapas)
+    # 3. Atualizar estado do jogo — chama update() de cada sprite
+    player.update()
+    blinky.update()
+    pinky.update()
+    inky.update()
+    clyde.update()
 
     # 4. Gerar saídas — desenhar o frame
 
@@ -214,14 +240,13 @@ while rodando:
             elif tile == '-':
                 pygame.draw.rect(window, PINK, (x, cy - 1, TILE_SIZE, 2))          # porta dos fantasmas
 
-    # --- Pac-Man ---
-    # Seleciona o sprite rotacionado de acordo com a direção atual de movimento
-    # blit(imagem, (x, y)) — mesmo método de imagens carregadas com image.load()
-    window.blit(pacman_sprites[(pacman_dx, pacman_dy)], (pacman_x, pacman_y))
-
-    # --- Fantasmas ---
-    for col, row, img in ghost_positions:
-        window.blit(img, (col * TILE_SIZE, MAZE_OFFSET_Y + row * TILE_SIZE))
+    # --- Sprites ---
+    # blit(imagem, rect) — sprite.rect carrega a posição, igual a image.load() + get_rect()
+    window.blit(player.image, player.rect)
+    window.blit(blinky.image, blinky.rect)
+    window.blit(pinky.image,  pinky.rect)
+    window.blit(inky.image,   inky.rect)
+    window.blit(clyde.image,  clyde.rect)
 
     # --- HUD: score e vidas ---
     # font.render(texto, antialias, cor) cria uma Surface com o texto desenhado
