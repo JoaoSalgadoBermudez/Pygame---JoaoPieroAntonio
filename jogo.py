@@ -9,6 +9,7 @@ COLS          = 28    # colunas do labirinto
 ROWS          = 31    # linhas do labirinto
 MAZE_OFFSET_Y = 40    # espaço de HUD acima do labirinto
 SPEED         = 2     # pixels movidos por frame
+FPS           = 60    # frames por segundo — limita a velocidade do loop em qualquer máquina
 
 WIDTH  = COLS * TILE_SIZE                          # 560
 HEIGHT = ROWS * TILE_SIZE + MAZE_OFFSET_Y + 20    # 680 (620 labirinto + 40 HUD topo + 20 HUD base)
@@ -155,10 +156,16 @@ ghost_positions = [
     (15, 14, clyde_img),   # Clyde  — direita da casa
 ]
 
+clock = pygame.time.Clock()  # relógio para controlar a velocidade do loop
+
 rodando = True  # controla o game loop — False encerra o jogo
 
 # Game loop: cada iteração gera um frame
 while rodando:
+
+    # clock.tick(FPS) pausa o loop pelo tempo necessário para não ultrapassar FPS frames/s.
+    # Sem isso, a velocidade do jogo variaria conforme o hardware. (Exercício 6)
+    clock.tick(FPS)
 
     # 1. Tratar eventos
     # pygame.event.get() devolve todos os eventos desde o último frame
