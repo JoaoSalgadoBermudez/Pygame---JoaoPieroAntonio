@@ -135,8 +135,10 @@ class Pacman(pygame.sprite.Sprite):
             ( 0,  1): pygame.transform.rotate(base, 270),
         }
 
-        self.dx = 1   # direção atual: começa indo para a direita
-        self.dy = 0
+        self.dx      = 1   # direção atual de movimento
+        self.dy      = 0
+        self.next_dx = 1   # próxima direção solicitada pelo jogador (buffered input)
+        self.next_dy = 0
 
         self.image = self.sprites_dir[(self.dx, self.dy)]  # imagem inicial
         self.rect  = self.image.get_rect()                 # rect define posição e hitbox
@@ -144,7 +146,11 @@ class Pacman(pygame.sprite.Sprite):
         self.rect.y = MAZE_OFFSET_Y + 23 * TILE_SIZE
 
     def update(self):
-        # Move se o próximo passo não colidir com parede
+        # Tenta virar para a direção solicitada — só muda se não houver parede nessa direção
+        if can_move(self.rect.x, self.rect.y, self.next_dx, self.next_dy):
+            self.dx, self.dy = self.next_dx, self.next_dy
+
+        # Move na direção atual se não houver parede na frente
         if can_move(self.rect.x, self.rect.y, self.dx, self.dy):
             self.rect.x += self.dx * SPEED
             self.rect.y += self.dy * SPEED
@@ -206,6 +212,15 @@ while rodando:
             rodando = False
         if event.type == pygame.KEYUP and event.key == pygame.K_ESCAPE:  # ESC encerra
             rodando = False
+        if event.type == pygame.KEYDOWN:  # KEYDOWN: disparado uma vez quando a tecla é pressionada
+            if event.key == pygame.K_RIGHT:
+                player.next_dx, player.next_dy =  1,  0
+            elif event.key == pygame.K_LEFT:
+                player.next_dx, player.next_dy = -1,  0
+            elif event.key == pygame.K_UP:
+                player.next_dx, player.next_dy =  0, -1
+            elif event.key == pygame.K_DOWN:
+                player.next_dx, player.next_dy =  0,  1
 
     # 2. Verificar consequências  (colisões — virá nas próximas etapas)
 
