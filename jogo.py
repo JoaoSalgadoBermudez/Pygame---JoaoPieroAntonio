@@ -8,6 +8,7 @@ TILE_SIZE     = 20    # cada tile do labirinto em pixels
 COLS          = 28    # colunas do labirinto
 ROWS          = 31    # linhas do labirinto
 MAZE_OFFSET_Y = 40    # espaço de HUD acima do labirinto
+SPEED         = 2     # pixels movidos por frame
 
 WIDTH  = COLS * TILE_SIZE                          # 560
 HEIGHT = ROWS * TILE_SIZE + MAZE_OFFSET_Y + 20    # 680 (620 labirinto + 40 HUD topo + 20 HUD base)
@@ -76,7 +77,7 @@ def criar_sprite_pacman():
     cx = cy = TILE_SIZE // 2
     r  = TILE_SIZE // 2 - 1
     pygame.draw.circle(surf, YELLOW, (cx, cy), r)  # corpo amarelo
-    # boca aberta 30° — Pac-Man virado para a direita
+    # boca aberta 30° — sprite base virado para a direita
     top    = (cx + r * math.cos(math.radians(-30)), cy + r * math.sin(math.radians(-30)))
     bottom = (cx + r * math.cos(math.radians( 30)), cy + r * math.sin(math.radians( 30)))
     pygame.draw.polygon(surf, BLACK, [(cx, cy), top, bottom])
@@ -97,7 +98,17 @@ def criar_sprite_fantasma(cor):
     return surf
 
 # Cria os sprites — equivalente a pygame.image.load('arquivo.png').convert_alpha()
-pacman_img = criar_sprite_pacman()
+_base_pacman = criar_sprite_pacman()
+
+# Quatro rotações do Pac-Man, uma por direção de movimento
+# pygame.transform.rotate() gira no sentido anti-horário
+pacman_sprites = {
+    ( 1,  0): _base_pacman,                                       # direita (base, 0°)
+    (-1,  0): pygame.transform.rotate(_base_pacman, 180),         # esquerda
+    ( 0, -1): pygame.transform.rotate(_base_pacman,  90),         # cima
+    ( 0,  1): pygame.transform.rotate(_base_pacman, 270),         # baixo
+}
+
 blinky_img = criar_sprite_fantasma(RED)     # Blinky — vermelho
 pinky_img  = criar_sprite_fantasma(PINK)    # Pinky  — rosa
 inky_img   = criar_sprite_fantasma(CYAN)    # Inky   — ciano
@@ -106,9 +117,35 @@ clyde_img  = criar_sprite_fantasma(ORANGE)  # Clyde  — laranja
 # pygame.transform.scale() seria usado aqui para redimensionar imagens externas (Exercício 4)
 # ex: pacman_img = pygame.transform.scale(pacman_img, (TILE_SIZE, TILE_SIZE))
 
+# --- Funções de colisão com o labirinto ---
+
+def tile_at(px, py):
+    # Converte coordenada de pixel para tile e retorna o caractere no MAZE_STR
+    col = int(px) // TILE_SIZE
+    row = (int(py) - MAZE_OFFSET_Y) // TILE_SIZE
+    if 0 <= row < ROWS and 0 <= col < COLS:
+        return MAZE_STR[row][col]
+    return ' '  # fora dos limites do mapa = espaço vazio
+
+def can_move(x, y, dx, dy):
+    # Verifica as duas extremidades da borda frontal do hitbox de Pac-Man.
+    # shrink=2: margem interna para que Pac-Man passe por corredores sem travar nas bordas
+    shrink = 2
+    nx, ny = x + dx * SPEED, y + dy * SPEED
+    if dx != 0:
+        borda_x = nx + TILE_SIZE - 1 if dx > 0 else nx
+        return tile_at(borda_x, ny + shrink) != '#' and \
+               tile_at(borda_x, ny + TILE_SIZE - 1 - shrink) != '#'
+    else:
+        borda_y = ny + TILE_SIZE - 1 if dy > 0 else ny
+        return tile_at(nx + shrink, borda_y) != '#' and \
+               tile_at(nx + TILE_SIZE - 1 - shrink, borda_y) != '#'
+
 # Posição inicial do Pac-Man — coluna 13, linha 23 do labirinto
-pacman_x = 13 * TILE_SIZE
-pacman_y = MAZE_OFFSET_Y + 23 * TILE_SIZE
+pacman_x  = 13 * TILE_SIZE
+pacman_y  = MAZE_OFFSET_Y + 23 * TILE_SIZE
+pacman_dx = 1   # começa se movendo para a direita (Exercício 5 — movimento automático)
+pacman_dy = 0
 
 # Posições iniciais dos fantasmas (coluna, linha, sprite)
 ghost_positions = [
@@ -126,14 +163,27 @@ while rodando:
     # 1. Tratar eventos
     # pygame.event.get() devolve todos os eventos desde o último frame
     for event in pygame.event.get():
-        if event.type == pygame.QUIT:   # usuário clicou no X da janela
+        if event.type == pygame.QUIT:                              # usuário clicou no X da janela
             rodando = False
-        if event.type == pygame.KEYUP:  # usuário soltou qualquer tecla (Exercício 1)
+        if event.type == pygame.KEYUP and event.key == pygame.K_ESCAPE:  # ESC encerra
             rodando = False
 
-    # 2. Verificar consequências  (lógica de jogo — virá nas próximas etapas)
+    # 2. Verificar consequências
 
-    # 3. Atualizar estado do jogo (movimento, colisões — virá nas próximas etapas)
+    # Move Pac-Man se o próximo passo não colidir com parede
+    if can_move(pacman_x, pacman_y, pacman_dx, pacman_dy):
+        pacman_x += pacman_dx * SPEED
+        pacman_y += pacman_dy * SPEED
+
+    # Teleporte pelo corredor da linha 14 — sai pela esquerda, aparece pela direita (e vice-versa)
+    pacman_row = (pacman_y - MAZE_OFFSET_Y) // TILE_SIZE
+    if pacman_row == 14:
+        if pacman_x + TILE_SIZE <= 0:   # saiu pela esquerda
+            pacman_x = WIDTH
+        elif pacman_x >= WIDTH:          # saiu pela direita
+            pacman_x = 0
+
+    # 3. Atualizar estado do jogo (sprites, animações — virá nas próximas etapas)
 
     # 4. Gerar saídas — desenhar o frame
 
@@ -157,10 +207,12 @@ while rodando:
             elif tile == '-':
                 pygame.draw.rect(window, PINK, (x, cy - 1, TILE_SIZE, 2))          # porta dos fantasmas
 
-    # --- Pac-Man e fantasmas ---
+    # --- Pac-Man ---
+    # Seleciona o sprite rotacionado de acordo com a direção atual de movimento
     # blit(imagem, (x, y)) — mesmo método de imagens carregadas com image.load()
-    window.blit(pacman_img, (pacman_x, pacman_y))
+    window.blit(pacman_sprites[(pacman_dx, pacman_dy)], (pacman_x, pacman_y))
 
+    # --- Fantasmas ---
     for col, row, img in ghost_positions:
         window.blit(img, (col * TILE_SIZE, MAZE_OFFSET_Y + row * TILE_SIZE))
 
