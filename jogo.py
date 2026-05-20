@@ -122,15 +122,6 @@ def can_move(x, y, dx, dy):
         return tile_at(nx + shrink, borda_y) != '#' and \
                tile_at(nx + TILE_SIZE - 1 - shrink, borda_y) != '#'
 
-# =============================================================================
-# CLASSES (Etapa 7 — Exercício 7)
-#
-# Todo pygame.sprite.Sprite precisa de:
-#   self.image — Surface que será desenhada
-#   self.rect  — Rect que define posição e tamanho
-#   update()   — chamado a cada frame para atualizar o estado
-# =============================================================================
-
 class Pacman(pygame.sprite.Sprite):
     def __init__(self):
         pygame.sprite.Sprite.__init__(self)  # inicializa o Sprite base — obrigatório
@@ -182,13 +173,20 @@ class Ghost(pygame.sprite.Sprite):
         pass  # movimento dos fantasmas virá nas próximas etapas
 
 
-# --- Instâncias (Exercício 7 — criar sprites usando a classe) ---
 player = Pacman()
 
 blinky = Ghost(13, 11, RED)    # Blinky — vermelho, acima da porta
 pinky  = Ghost(13, 14, PINK)   # Pinky  — rosa, centro da casa
 inky   = Ghost(11, 14, CYAN)   # Inky   — ciano, esquerda da casa
 clyde  = Ghost(15, 14, ORANGE) # Clyde  — laranja, direita da casa
+
+# Groups (Etapa 8) — pygame.sprite.Group agrupa sprites para atualizar e desenhar de uma vez
+all_sprites = pygame.sprite.Group()   # todos os sprites do jogo
+ghosts      = pygame.sprite.Group()   # só os fantasmas — útil para colisões depois
+
+all_sprites.add(player)
+all_sprites.add(blinky, pinky, inky, clyde)  # add() aceita múltiplos sprites de uma vez
+ghosts.add     (blinky, pinky, inky, clyde)  # cada fantasma entra em dois grupos
 
 clock = pygame.time.Clock()  # relógio para controlar a velocidade do loop
 
@@ -211,12 +209,8 @@ while rodando:
 
     # 2. Verificar consequências  (colisões — virá nas próximas etapas)
 
-    # 3. Atualizar estado do jogo — chama update() de cada sprite
-    player.update()
-    blinky.update()
-    pinky.update()
-    inky.update()
-    clyde.update()
+    # 3. Atualizar estado do jogo — chama update() de todos os sprites do grupo de uma vez
+    all_sprites.update()
 
     # 4. Gerar saídas — desenhar o frame
 
@@ -241,12 +235,8 @@ while rodando:
                 pygame.draw.rect(window, PINK, (x, cy - 1, TILE_SIZE, 2))          # porta dos fantasmas
 
     # --- Sprites ---
-    # blit(imagem, rect) — sprite.rect carrega a posição, igual a image.load() + get_rect()
-    window.blit(player.image, player.rect)
-    window.blit(blinky.image, blinky.rect)
-    window.blit(pinky.image,  pinky.rect)
-    window.blit(inky.image,   inky.rect)
-    window.blit(clyde.image,  clyde.rect)
+    # draw() percorre o grupo e chama blit(sprite.image, sprite.rect) em cada um
+    all_sprites.draw(window)
 
     # --- HUD: score e vidas ---
     # font.render(texto, antialias, cor) cria uma Surface com o texto desenhado
