@@ -1,8 +1,10 @@
 import pygame
 import sys
 import math
+import array  # gerar buffers de áudio sem dependências externas
 
 pygame.init()
+pygame.mixer.init(44100, -16, 1, 512)  # 44100 Hz, 16-bit signed, mono, buffer 512
 
 TILE_SIZE     = 20    # cada tile do labirinto em pixels
 COLS          = 28    # colunas do labirinto
@@ -123,6 +125,27 @@ def can_move(x, y, dx, dy):
         return tile_at(nx + shrink, borda_y) != '#' and \
                tile_at(nx + TILE_SIZE - 1 - shrink, borda_y) != '#'
 
+# --- Sons ---
+# pygame.mixer.Sound(buffer=) aceita um array de amostras no mesmo formato do mixer.
+# Equivalente a pygame.mixer.Sound('arquivo.wav') — só a fonte dos dados muda.
+
+def gerar_tom(freq, duracao_ms, volume=0.4):
+    taxa = 44100
+    n    = int(taxa * duracao_ms / 1000)
+    buf  = array.array('h', [0] * n)
+    for i in range(n):
+        fade     = min(1.0, (n - i) / (taxa * 0.02 + 1))  # fade out nos últimos ~20ms
+        buf[i]   = int(volume * 32767 * fade * math.sin(2 * math.pi * freq * i / taxa))
+    return pygame.mixer.Sound(buffer=buf)
+
+# Exercícios 13 e 14 — sons organizados em dicionário (assets)
+sons = {
+    'pellet': gerar_tom(880, 60),    # waka curto e agudo
+    'power':  gerar_tom(440, 300),   # power pellet — mais grave e longo
+    'morte':  gerar_tom(200, 700),   # morte — grave e lento
+}
+
+
 class Pacman(pygame.sprite.Sprite):
     def __init__(self):
         pygame.sprite.Sprite.__init__(self)  # inicializa o Sprite base — obrigatório
@@ -239,17 +262,20 @@ while rodando:
         if t == '.':
             maze[row_pm][col_pm] = ' '   # remove o pellet do mapa
             score += 10
+            sons['pellet'].play()         # Exercício 13 — som ao comer pellet
         elif t == 'o':
             maze[row_pm][col_pm] = ' '   # remove o power pellet do mapa
             score += 50
+            sons['power'].play()          # Exercício 13 — som ao comer power pellet
 
     # Colisão com fantasmas — spritecollide retorna lista de fantasmas que tocaram Pac-Man
     # (Exercício 11 — spritecollide entre um sprite e um grupo)
     if pygame.sprite.spritecollide(player, ghosts, False):
+        sons['morte'].play()          # Exercício 13 — som de morte
         vidas -= 1
-        player.reset()           # volta para a posição inicial
+        player.reset()                # volta para a posição inicial
         if vidas <= 0:
-            rodando = False      # game over — tela própria vem na Etapa 16
+            rodando = False           # game over — tela própria vem na Etapa 16
 
     # 3. Atualizar estado do jogo — chama update() de todos os sprites do grupo de uma vez
     all_sprites.update()
