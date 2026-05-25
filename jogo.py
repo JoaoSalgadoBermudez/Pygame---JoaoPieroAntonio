@@ -2,7 +2,8 @@ import pygame
 import sys
 import math
 import array  # gerar buffers de áudio sem dependências externas
-from fantasmas import mover_blinky, mover_pinky, mover_inky, mover_clyde
+from fantasmas import mover_blinky, mover_pinky, mover_inky, mover_clyde, IN_HOUSE, EXITING, CHASING, EATEN
+import medo
 
 pygame.init()
 pygame.mixer.init(44100, -16, 1, 512)  # 44100 Hz, 16-bit signed, mono, buffer 512
@@ -70,9 +71,8 @@ pygame.display.set_caption("Pac-Man")              # título da barra da janela
 font_hud   = pygame.font.SysFont(None, 28)  # fonte para score e vidas
 font_title = pygame.font.SysFont(None, 64)  # fonte para GAME OVER, tela inicial, etc.
 
-score             = 0
-vidas             = 3
-proximo_extra_vida = 1000  # próxima pontuação que concede uma vida extra (Exercício 18)
+score = 0
+vidas = 3
 
 # --- Funções auxiliares de sprite ---
 # pygame.image.load() também retorna um Surface — a interface é idêntica.
@@ -101,6 +101,16 @@ def criar_sprite_fantasma(cor):
     pygame.draw.circle(surf, WHITE, (cx + 4, r - 2), 3)   # olho direito
     pygame.draw.circle(surf, BLUE,  (cx - 3, r - 2), 1)   # pupila esquerda
     pygame.draw.circle(surf, BLUE,  (cx + 3, r - 2), 1)   # pupila direita
+    return surf
+
+def criar_sprite_olhos():
+    surf = pygame.Surface((TILE_SIZE, TILE_SIZE), pygame.SRCALPHA)
+    cx = TILE_SIZE // 2
+    r  = TILE_SIZE // 2
+    pygame.draw.circle(surf, WHITE, (cx - 4, r - 2), 3)
+    pygame.draw.circle(surf, WHITE, (cx + 4, r - 2), 3)
+    pygame.draw.circle(surf, BLUE,  (cx - 3, r - 2), 1)
+    pygame.draw.circle(surf, BLUE,  (cx + 3, r - 2), 1)
     return surf
 
 # --- Funções de colisão com o labirinto ---
@@ -142,14 +152,19 @@ def gerar_tom(freq, duracao_ms, volume=0.4):
 
 # Exercícios 13 e 14 — sons organizados em dicionário (assets)
 sons = {
-    'pellet':     gerar_tom(880,  60),   # waka curto e agudo
-    'power':      gerar_tom(440, 300),   # power pellet — mais grave e longo
-    'morte':      gerar_tom(200, 700),   # morte — grave e lento
-    'extra_vida': gerar_tom(660, 400),   # jingle de vida extra
+    'pellet':         gerar_tom(880,  60),
+    'power':          gerar_tom(440, 300),
+    'morte':          gerar_tom(200, 700),
+    'comer_fantasma': gerar_tom(600, 150),
 }
 
 # Ícone de vida usado no HUD — pequeno sprite do Pac-Man (Exercício 17/18)
 vida_icon = pygame.transform.scale(criar_sprite_pacman(25), (16, 16))
+
+# Superfícies especiais — criadas uma vez para não recriar todo frame
+_surf_medo_azul   = criar_sprite_fantasma((0,   50, 255))
+_surf_medo_branco = criar_sprite_fantasma((255, 255, 255))
+_surf_olhos       = criar_sprite_olhos()
 
 
 class Pacman(pygame.sprite.Sprite):
@@ -183,24 +198,44 @@ class Pacman(pygame.sprite.Sprite):
         self.rect.y = MAZE_OFFSET_Y + 23 * TILE_SIZE
 
     def update(self):
-        # Tenta virar para a direção solicitada — só muda se não houver parede nessa direção
-        if can_move(self.rect.x, self.rect.y, self.next_dx, self.next_dy):
-            self.dx, self.dy = self.next_dx, self.next_dy
+        if (self.next_dx, self.next_dy) != (self.dx, self.dy):
+            nx, ny = self.rect.x, self.rect.y
+            virou = False
 
-        # Move na direção atual se não houver parede na frente
+            # Tenta virar na posição atual (sem correção)
+            if can_move(nx, ny, self.next_dx, self.next_dy):
+                virou = True
+
+            # Se falhou e é uma virada de 90°: tenta um recuo mínimo (máx. SPEED*2 = 4px)
+            # para alinhar com a borda do tile. Sem snap para frente — nunca teleporta.
+            elif self.dx != 0 and self.next_dy != 0:   # horizontal → vertical
+                rem = nx % TILE_SIZE
+                if 0 < rem <= SPEED * 2:
+                    nx -= rem
+                    if can_move(nx, ny, self.next_dx, self.next_dy):
+                        self.rect.x = nx
+                        virou = True
+            elif self.dy != 0 and self.next_dx != 0:   # vertical → horizontal
+                rem = (ny - MAZE_OFFSET_Y) % TILE_SIZE
+                if 0 < rem <= SPEED * 2:
+                    ny -= rem
+                    if can_move(nx, ny, self.next_dx, self.next_dy):
+                        self.rect.y = ny
+                        virou = True
+
+            if virou:
+                self.dx, self.dy = self.next_dx, self.next_dy
+
         if can_move(self.rect.x, self.rect.y, self.dx, self.dy):
             self.rect.x += self.dx * SPEED
             self.rect.y += self.dy * SPEED
 
-        # Teleporte pelo corredor da linha 14 — rect.right e rect.left são atributos do Rect
         if (self.rect.y - MAZE_OFFSET_Y) // TILE_SIZE == 14:
-            if self.rect.right <= 0:    # saiu pela esquerda
+            if self.rect.right <= 0:
                 self.rect.x = WIDTH
-            elif self.rect.left >= WIDTH:  # saiu pela direita
+            elif self.rect.left >= WIDTH:
                 self.rect.x = 0
 
-        # Animação — troca de frame a cada frame_ticks ms
-        # pygame.time.get_ticks() retorna ms desde que o pygame foi iniciado
         agora = pygame.time.get_ticks()
         if agora - self.last_anim_time > self.frame_ticks:
             self.anim_frame     = (self.anim_frame + 1) % len(self.anim_frames)
@@ -219,12 +254,23 @@ class Ghost(pygame.sprite.Sprite):
     def __init__(self, col, row, cor):
         pygame.sprite.Sprite.__init__(self)  # inicializa o Sprite base — obrigatório
 
-        self.image = criar_sprite_fantasma(cor)  # Surface com o desenho do fantasma
+        self.cor   = cor
+        self.col0  = col   # coluna inicial — usada para respawnar na casinha
+        self.row0  = row
+        self.image = criar_sprite_fantasma(cor)
         self.rect  = self.image.get_rect()
         self.rect.x = col * TILE_SIZE
         self.rect.y = MAZE_OFFSET_Y + row * TILE_SIZE
         self.dx = 0  # direção atual — usada pela IA para não reverter o movimento
         self.dy = 0
+
+    def reset(self):
+        # respawna no ponto de saída da casinha já pronto para perseguir
+        self.rect.x = 13 * TILE_SIZE
+        self.rect.y = MAZE_OFFSET_Y + 11 * TILE_SIZE
+        self.dx     = -1
+        self.dy     = 0
+        self.estado = CHASING
 
     def update(self):
         pass
@@ -244,6 +290,25 @@ ghosts      = pygame.sprite.Group()   # só os fantasmas — útil para colisõe
 all_sprites.add(player)
 all_sprites.add(blinky, pinky, inky, clyde)  # add() aceita múltiplos sprites de uma vez
 ghosts.add     (blinky, pinky, inky, clyde)  # cada fantasma entra em dois grupos
+
+# Estados dos fantasmas e tempos de liberação da casinha
+_t0 = pygame.time.get_ticks()
+
+blinky.estado = CHASING    # começa fora, persegue imediatamente
+blinky.liberado_em = 0
+blinky.dx = -1
+
+pinky.estado = IN_HOUSE
+pinky.liberado_em = _t0 + 5_000   # sai após 5s
+pinky.dy = -1                       # começa subindo na casinha
+
+inky.estado = IN_HOUSE
+inky.liberado_em = _t0 + 12_000   # sai após 12s
+inky.dy = 1                         # começa descendo
+
+clyde.estado = IN_HOUSE
+clyde.liberado_em = _t0 + 20_000  # sai após 20s
+clyde.dy = -1
 
 clock = pygame.time.Clock()  # relógio para controlar a velocidade do loop
 
@@ -300,27 +365,56 @@ while state != QUIT:
                 maze[row_pm][col_pm] = ' '
                 score += 50
                 sons['power'].play()
+                medo.ativar()
 
-            # Exercício 18 — vida extra a cada 1000 pontos
-            if score >= proximo_extra_vida:
-                vidas += 1
-                proximo_extra_vida += 1000
-                sons['extra_vida'].play()
-
-        # Colisão com fantasmas — spritecollide retorna lista de fantasmas que tocaram Pac-Man
-        # (Exercício 11 — spritecollide entre um sprite e um grupo)
-        if pygame.sprite.spritecollide(player, ghosts, False):
-            sons['morte'].play()
-            vidas      -= 1
-            state       = DYING                       # entra no estado de morte
-            dying_start = pygame.time.get_ticks()     # registra o instante da morte
+        # Colisão com fantasmas
+        colisoes = pygame.sprite.spritecollide(player, ghosts, False)
+        if colisoes:
+            if medo.ativo():
+                for g in colisoes:
+                    if g.estado == CHASING:
+                        score += 200
+                        g.estado = EATEN   # olhinhos voltam para a casinha
+                        sons['comer_fantasma'].play()
+            else:
+                # só morre se bater em fantasma solto (não na casinha ou a caminho dela)
+                if any(g.estado == CHASING for g in colisoes):
+                    sons['morte'].play()
+                    vidas      -= 1
+                    state       = DYING
+                    dying_start = pygame.time.get_ticks()
 
     if state == DYING:
-        # Exercício 15 — aguarda duração fixa antes de agir (semelhante ao delay de tiro)
-        # pygame.time.get_ticks() retorna ms desde que o pygame foi iniciado
         if pygame.time.get_ticks() - dying_start > 1500:
             if vidas > 0:
-                player.reset()   # Exercício 16 — respawna Pac-Man após a animação
+                player.reset()
+
+                # Reinicia todos os fantasmas para as posições e estados iniciais
+                agora = pygame.time.get_ticks()
+
+                blinky.rect.x = 13 * TILE_SIZE
+                blinky.rect.y = MAZE_OFFSET_Y + 11 * TILE_SIZE
+                blinky.dx, blinky.dy = -1, 0
+                blinky.estado = CHASING
+
+                pinky.rect.x = 13 * TILE_SIZE
+                pinky.rect.y = MAZE_OFFSET_Y + 14 * TILE_SIZE
+                pinky.dx, pinky.dy = 0, -1
+                pinky.estado = IN_HOUSE
+                pinky.liberado_em = agora + 5_000
+
+                inky.rect.x = 11 * TILE_SIZE
+                inky.rect.y = MAZE_OFFSET_Y + 14 * TILE_SIZE
+                inky.dx, inky.dy = 0, 1
+                inky.estado = IN_HOUSE
+                inky.liberado_em = agora + 12_000
+
+                clyde.rect.x = 15 * TILE_SIZE
+                clyde.rect.y = MAZE_OFFSET_Y + 14 * TILE_SIZE
+                clyde.dx, clyde.dy = 0, -1
+                clyde.estado = IN_HOUSE
+                clyde.liberado_em = agora + 20_000
+
                 state = PLAYING
             else:
                 state = GAME_OVER
@@ -357,7 +451,14 @@ while state != QUIT:
 
     # --- Sprites ---
     # Fantasmas são sempre desenhados; Pac-Man pisca durante DYING (a cada 150ms)
-    ghosts.draw(window)
+    for g in ghosts:
+        if g.estado == EATEN:
+            window.blit(_surf_olhos, g.rect)
+        elif medo.ativo() and g.estado == CHASING:
+            surf = _surf_medo_branco if medo.piscando() and (pygame.time.get_ticks() // 250) % 2 == 0 else _surf_medo_azul
+            window.blit(surf, g.rect)
+        else:
+            window.blit(g.image, g.rect)
     piscar = (pygame.time.get_ticks() // 150) % 2 == 0  # alterna visível/invisível
     if state != DYING or piscar:
         window.blit(player.image, player.rect)
