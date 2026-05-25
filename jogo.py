@@ -1,7 +1,6 @@
 import pygame
 import sys
 import math
-import array
 from fantasmas import mover_blinky, mover_pinky, mover_inky, mover_clyde, IN_HOUSE, EXITING, CHASING, EATEN
 import medo
 
@@ -92,10 +91,18 @@ def criar_sprite_pacman(angulo_boca=30):
     cx = cy = TILE_SIZE // 2
     r  = TILE_SIZE // 2 - 1
     pygame.draw.circle(surf, YELLOW, (cx, cy), r)
-    if angulo_boca > 0:
-        top    = (cx + r * math.cos(math.radians(-angulo_boca)), cy + r * math.sin(math.radians(-angulo_boca)))
-        bottom = (cx + r * math.cos(math.radians( angulo_boca)), cy + r * math.sin(math.radians( angulo_boca)))
-        pygame.draw.polygon(surf, BLACK, [(cx, cy), top, bottom])
+    if 0 < angulo_boca < 180:
+        steps  = max(3, int(angulo_boca / 5))
+        pontos = [(cx, cy)]
+        for i in range(steps + 1):
+            ang = -angulo_boca + 2 * angulo_boca * i / steps
+            pontos.append((
+                cx + r * math.cos(math.radians(ang)),
+                cy + r * math.sin(math.radians(ang)),
+            ))
+        pygame.draw.polygon(surf, BLACK, pontos)
+    elif angulo_boca >= 180:
+        surf.fill((0, 0, 0, 0))   # círculo completo aberto = Pac-Man desaparece
     return surf
 
 
@@ -150,23 +157,16 @@ def can_move(x, y, dx, dy):
 
 # ── Sons ────────────────────────────────────────────────────────────────────
 
-def gerar_tom(freq, duracao_ms, volume=0.4):
-    taxa = 44100
-    n    = int(taxa * duracao_ms / 1000)
-    buf  = array.array('h', [0] * n)
-    for i in range(n):
-        fade   = min(1.0, (n - i) / (taxa * 0.02 + 1))
-        buf[i] = int(volume * 32767 * fade * math.sin(2 * math.pi * freq * i / taxa))
-    return pygame.mixer.Sound(buffer=buf)
-
-
 sons = {
-    'pellet':         gerar_tom(880,  60),
-    'power':          gerar_tom(440, 300),
-    'morte':          gerar_tom(200, 700),
-    'comer_fantasma': gerar_tom(600, 150),
-    'extra_vida':     gerar_tom(1200, 600),
+    'pellet':       pygame.mixer.Sound('sons/pacman_chomp.wav'),
+    'power':        pygame.mixer.Sound('sons/pacman_eatfruit.wav'),
+    'morte':        pygame.mixer.Sound('sons/pacman_death.wav'),
+    'comer_fantasma': pygame.mixer.Sound('sons/pacman_eatghost.wav'),
+    'extra_vida':   pygame.mixer.Sound('sons/pacman_extrapac.wav'),
+    'beginning':    pygame.mixer.Sound('sons/pacman_beginning.wav'),
+    'intermission': pygame.mixer.Sound('sons/pacman_intermission.wav'),
 }
+sons['pellet'].set_volume(0.5)  # chomp toca com frequência — volume moderado
 
 vida_icon = pygame.transform.scale(criar_sprite_pacman(25), (16, 16))
 
@@ -208,6 +208,9 @@ class Pacman(pygame.sprite.Sprite):
         self.anim_frame     = 0
         self.last_anim_time = 0
         self.frame_ticks    = 100
+
+        # Frames da animação de morte: boca abre de 30° até sumir
+        self.morte_frames = [criar_sprite_pacman(a) for a in range(30, 181, 15)]
 
         self.dx      = 1
         self.dy      = 0
@@ -335,12 +338,66 @@ def _iniciar_fantasmas():
 
 def _reiniciar_tudo():
     global score, vidas, maze
-    score       = 0
-    vidas       = 3
-    maze        = [list(row) for row in _MAZE_ROWS]
-    medo._ativo = False
+    score          = 0
+    vidas          = 3
+    maze           = [list(row) for row in _MAZE_ROWS]
+    medo._ativo    = False
     player.reset()
     _iniciar_fantasmas()
+
+
+def _aguardar_jingle():
+    channel = sons['beginning'].play()
+    pygame.event.clear()
+    while channel and channel.get_busy():
+        clock.tick(FPS)
+        quit_req = False
+        for evt in pygame.event.get():
+            if evt.type == pygame.QUIT:
+                quit_req = True
+            if evt.type == pygame.KEYUP and evt.key == pygame.K_ESCAPE:
+                quit_req = True
+            if evt.type == pygame.KEYDOWN:
+                if evt.key == pygame.K_F11:
+                    _toggle_fullscreen()
+                elif evt.key == pygame.K_RIGHT:
+                    player.next_dx, player.next_dy =  1,  0
+                elif evt.key == pygame.K_LEFT:
+                    player.next_dx, player.next_dy = -1,  0
+                elif evt.key == pygame.K_UP:
+                    player.next_dx, player.next_dy =  0, -1
+                elif evt.key == pygame.K_DOWN:
+                    player.next_dx, player.next_dy =  0,  1
+        if quit_req:
+            channel.stop()
+            return False
+        window.fill(BLACK)
+        for row, linha in enumerate(maze):
+            for col, tile in enumerate(linha):
+                x  = col * TILE_SIZE
+                y  = MAZE_OFFSET_Y + row * TILE_SIZE
+                cx = x + TILE_SIZE // 2
+                cy = y + TILE_SIZE // 2
+                if tile == '#':
+                    pygame.draw.rect(window, BLUE, (x, y, TILE_SIZE, TILE_SIZE))
+                elif tile == '.':
+                    pygame.draw.circle(window, WHITE, (cx, cy), 2)
+                elif tile == 'o':
+                    pygame.draw.circle(window, YELLOW, (cx, cy), 5)
+                elif tile == '-':
+                    pygame.draw.rect(window, PINK, (x, cy - 1, TILE_SIZE, 2))
+        for g in ghosts:
+            window.blit(g.image, g.rect)
+        window.blit(player.image, player.rect)
+        window.blit(font_hud.render("1UP",      True, WHITE), (10,  4))
+        window.blit(font_hud.render(str(score), True, WHITE), (10, 20))
+        for i in range(vidas):
+            window.blit(vida_icon, (8 + i * 20, HEIGHT - 18))
+        ready = font_hud.render("GET READY!", True, YELLOW)
+        window.blit(ready, ready.get_rect(center=(WIDTH // 2, HEIGHT // 2)))
+        pygame.display.update()
+    pygame.event.clear()
+    return True
 
 
 def pellets_remaining():
@@ -486,6 +543,7 @@ PLAYING   = 1
 DYING     = 2
 GAME_OVER = 3
 START     = 4
+STARTING  = 5   # jingle tocando antes do jogo começar
 
 state       = START
 dying_start = 0
@@ -509,11 +567,11 @@ while state != QUIT:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             if state == START and _press_start_rect.collidepoint(event.pos):
                 _reiniciar_tudo()
-                state = PLAYING
+                state = STARTING
             elif state == GAME_OVER:
                 if _yes_rect.collidepoint(event.pos):
                     _reiniciar_tudo()
-                    state = PLAYING
+                    state = STARTING
                 elif _no_rect.collidepoint(event.pos):
                     state = START
 
@@ -523,16 +581,7 @@ while state != QUIT:
 
             if state == START:
                 _reiniciar_tudo()
-                state = PLAYING
-                # Aplica a seta que iniciou o jogo como primeira direção
-                if event.key == pygame.K_RIGHT:
-                    player.next_dx, player.next_dy =  1,  0
-                elif event.key == pygame.K_LEFT:
-                    player.next_dx, player.next_dy = -1,  0
-                elif event.key == pygame.K_UP:
-                    player.next_dx, player.next_dy =  0, -1
-                elif event.key == pygame.K_DOWN:
-                    player.next_dx, player.next_dy =  0,  1
+                state = STARTING
 
             if state == PLAYING:
                 if event.key == pygame.K_RIGHT:
@@ -552,11 +601,19 @@ while state != QUIT:
                 elif event.key == pygame.K_RETURN:
                     if _go_cursor == 0:
                         _reiniciar_tudo()
-                        state = PLAYING
+                        state = STARTING
                     else:
                         state = START
 
-    # 2. Verificar consequências
+    # 2. Tocar jingle e aguardar antes de começar
+    if state == STARTING:
+        if not _aguardar_jingle():
+            state = QUIT
+        else:
+            _iniciar_fantasmas()   # re-inicia timers com hora correta (após a jingle)
+            state = PLAYING
+
+    # 3. Verificar consequências
     if state == PLAYING:
 
         col_pm = player.rect.centerx // TILE_SIZE
@@ -566,7 +623,8 @@ while state != QUIT:
             if t == '.':
                 maze[row_pm][col_pm] = ' '
                 score += 10
-                sons['pellet'].play()
+                if sons['pellet'].get_num_channels() == 0:
+                    sons['pellet'].play()
             elif t == 'o':
                 maze[row_pm][col_pm] = ' '
                 score += 50
@@ -580,16 +638,17 @@ while state != QUIT:
             _fantasmas_comidos_rodada = 0
             player.reset()
             _iniciar_fantasmas()
+            sons['intermission'].play()
 
         colisoes = pygame.sprite.spritecollide(player, ghosts, False)
         if colisoes:
             if medo.ativo():
                 for g in colisoes:
                     if g.estado == CHASING:
-                        score += 200
+                        _fantasmas_comidos_rodada += 1
+                        score += 200 * _fantasmas_comidos_rodada
                         g.estado = EATEN
                         sons['comer_fantasma'].play()
-                        _fantasmas_comidos_rodada += 1
                         if _fantasmas_comidos_rodada == 4:
                             vidas += 1
                             sons['extra_vida'].play()
@@ -635,7 +694,7 @@ while state != QUIT:
                 _go_cursor = 0
                 state = GAME_OVER
 
-    # 3. Atualizar sprites
+    # 4. Atualizar sprites
     if state == PLAYING:
         all_sprites.update()
         mover_blinky(blinky, player)
@@ -643,7 +702,7 @@ while state != QUIT:
         mover_inky(inky, player, blinky)
         mover_clyde(clyde, player)
 
-    # 4. Desenhar
+    # 5. Desenhar
     window.fill(BLACK)
 
     if state == START:
@@ -677,8 +736,11 @@ while state != QUIT:
             else:
                 window.blit(g.image, g.rect)
 
-        piscar = (pygame.time.get_ticks() // 150) % 2 == 0
-        if state != DYING or piscar:
+        if state == DYING:
+            frame_idx = (pygame.time.get_ticks() - dying_start) // 130
+            if frame_idx < len(player.morte_frames):
+                window.blit(player.morte_frames[frame_idx], player.rect)
+        else:
             window.blit(player.image, player.rect)
 
         # HUD
